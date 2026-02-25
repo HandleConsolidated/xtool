@@ -18,6 +18,7 @@ RUN apt-get update \
     curl libcurl4-openssl-dev \
     zip unzip \
     liblzma-dev zlib1g-dev \
+    libturbojpeg0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 
