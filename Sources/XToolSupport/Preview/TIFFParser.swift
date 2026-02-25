@@ -214,23 +214,20 @@ enum TIFFParser {
             result.reserveCapacity(Int(count))
 
             for j in 0..<Int(count) {
-                let itemOffset: Int
-                let itemValue: UInt32
                 switch type {
                 case 3: // SHORT (2 bytes)
-                    itemOffset = dataOffset + j * 2
+                    let itemOffset = dataOffset + j * 2
                     guard itemOffset + 2 <= bytes.count else { break }
-                    itemValue = UInt32(
+                    result.append(UInt32(
                         readUInt16(bytes, offset: itemOffset, le: le)
-                    )
+                    ))
                 default: // LONG (4 bytes)
-                    itemOffset = dataOffset + j * 4
+                    let itemOffset = dataOffset + j * 4
                     guard itemOffset + 4 <= bytes.count else { break }
-                    itemValue = readUInt32(
+                    result.append(readUInt32(
                         bytes, offset: itemOffset, le: le
-                    )
+                    ))
                 }
-                result.append(itemValue)
             }
             return result
         }

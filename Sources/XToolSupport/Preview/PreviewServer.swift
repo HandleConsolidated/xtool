@@ -5,6 +5,13 @@ import NIOHTTP1
 import NIOWebSocket
 import XKit
 
+/// Wrapper for passing non-Sendable values across Task boundaries.
+/// Safety: Only use when access is serialized by design (e.g.
+/// NIO event loop handlers).
+private struct UnsafeTransfer<Value>: @unchecked Sendable {
+    let value: Value
+}
+
 // MARK: - Build Status
 
 /// Tracks build/install status for live reload SSE broadcasting.
@@ -235,7 +242,7 @@ actor PreviewServer {
         let udid = deviceUDID
         let display = displayInfo
 
-        nonisolated(unsafe) let wsUpgrader = NIOWebSocketServerUpgrader(
+        let wsUpgrader = NIOWebSocketServerUpgrader(
             shouldUpgrade: { channel, head in
                 guard head.uri == "/ws" else {
                     return channel.eventLoop.makeSucceededFuture(nil)
@@ -260,7 +267,7 @@ actor PreviewServer {
         .serverChannelOption(.backlog, value: 256)
         .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
         .childChannelInitializer { channel in
-            let upgradeConfig = NIOHTTPServerUpgradeConfiguration(
+            nonisolated(unsafe) let upgradeConfig = NIOHTTPServerUpgradeConfiguration(
                 upgraders: [wsUpgrader],
                 completionHandler: { _ in }
             )
@@ -360,12 +367,13 @@ private final class WebSocketStreamHandler:
     }
 
     private func startStreaming(context: ChannelHandlerContext) {
-        nonisolated(unsafe) let context = context
+        let ctx = UnsafeTransfer(value: context)
         let producer = frameProducer
         let interval = 1.0 / Double(fps)
-        var lastSeq: UInt64 = 0
 
         streamTask = Task {
+            nonisolated(unsafe) let context = ctx.value
+            var lastSeq: UInt64 = 0
             while !Task.isCancelled {
                 do {
                     if let frame = await producer.latestFrame,
@@ -497,7 +505,6 @@ private final class PreviewHTTPHandler:
     private func startMJPEGStream(
         context: ChannelHandlerContext
     ) {
-        nonisolated(unsafe) let context = context
         isStreaming = true
         Task { await frameProducer.subscribe() }
 
@@ -515,19 +522,21 @@ private final class PreviewHTTPHandler:
             wrapOutboundOut(.head(head)), promise: nil
         )
 
+        let ctx = UnsafeTransfer(value: context)
         let producer = frameProducer
         let bnd = boundary
         let interval = 1.0 / Double(fps)
-        var lastSeq: UInt64 = 0
 
-        streamTask = Task { [weak self] in
+        streamTask = Task {
+            nonisolated(unsafe) let context = ctx.value
+            var lastSeq: UInt64 = 0
             while !Task.isCancelled {
                 do {
                     if let frame = await producer.latestFrame,
                        frame.sequence > lastSeq
                     {
                         lastSeq = frame.sequence
-                        guard let self, self.isStreaming else {
+                        guard self.isStreaming else {
                             break
                         }
 
@@ -575,9 +584,10 @@ private final class PreviewHTTPHandler:
     private func serveSingleFrame(
         context: ChannelHandlerContext
     ) {
-        nonisolated(unsafe) let context = context
+        let ctx = UnsafeTransfer(value: context)
         let producer = frameProducer
         Task {
+            nonisolated(unsafe) let context = ctx.value
             await producer.subscribe()
             defer { Task { await producer.unsubscribe() } }
 
@@ -661,7 +671,6 @@ private final class PreviewHTTPHandler:
     private func startSSEStream(
         context: ChannelHandlerContext
     ) {
-        nonisolated(unsafe) let context = context
         let headers = HTTPHeaders([
             ("Content-Type", "text/event-stream"),
             ("Cache-Control", "no-cache"),
@@ -674,8 +683,10 @@ private final class PreviewHTTPHandler:
             wrapOutboundOut(.head(head)), promise: nil
         )
 
+        let ctx = UnsafeTransfer(value: context)
         let broadcaster = buildStatus
-        sseTask = Task { [weak self] in
+        sseTask = Task {
+            nonisolated(unsafe) let context = ctx.value
             var lastSeq: UInt64 = 0
             while !Task.isCancelled {
                 let event = await broadcaster.latest
@@ -692,7 +703,6 @@ private final class PreviewHTTPHandler:
                         )
                     buffer.writeString(line)
                     let sendBuffer = buffer
-                    guard let self else { break }
                     let promise =
                         context.eventLoop.makePromise(
                             of: Void.self
