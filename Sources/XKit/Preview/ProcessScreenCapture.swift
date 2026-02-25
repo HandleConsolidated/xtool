@@ -101,7 +101,14 @@ public actor ProcessScreenCapture: ScreenCaptureSource {
     }
 
     private static func findTool(_ name: String) -> String? {
-        let searchPaths = [
+        var searchPaths: [String] = []
+        // Check AppImage bundle first (avoids ABI mismatch
+        // with system libimobiledevice)
+        if let appDir = ProcessInfo.processInfo
+            .environment["APPDIR"] {
+            searchPaths.append("\(appDir)/usr/bin")
+        }
+        searchPaths += [
             "/usr/bin",
             "/usr/local/bin",
             "/usr/sbin",

@@ -130,7 +130,14 @@ enum DDIAutoMounter {
     private static func findTool(
         _ name: String
     ) -> String? {
-        let paths = [
+        var paths: [String] = []
+        // Check AppImage bundle first (avoids ABI mismatch
+        // with system libimobiledevice)
+        if let appDir = ProcessInfo.processInfo
+            .environment["APPDIR"] {
+            paths.append("\(appDir)/usr/bin/\(name)")
+        }
+        paths += [
             "/usr/bin/\(name)",
             "/usr/local/bin/\(name)",
             "/usr/sbin/\(name)",

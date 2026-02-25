@@ -40,6 +40,13 @@ fi
 mkdir -p staging/tmp/AppDir/usr/bin
 find "${bin}"/ -name '*.resources' -print0 | xargs -0 -I {} cp -a {} "${PWD}/staging/tmp/AppDir/usr/bin/"
 
+# Bundle libimobiledevice utils for DDI mounting (preview feature)
+for util in ideviceimagemounter idevicescreenshot; do
+    if command -v "$util" &>/dev/null; then
+        cp "$(command -v "$util")" staging/tmp/AppDir/usr/bin/
+    fi
+done
+
 export LINUXDEPLOY_OUTPUT_VERSION="${XTOOL_VERSION:-unversioned}"
 export LDAI_OUTPUT="staging/tmp/xtool-${curr_arch}.AppImage"
 export LDAI_UPDATE_INFORMATION="gh-releases-zsync|xtool-org|xtool|latest|xtool-${curr_arch}.AppImage.zsync"
