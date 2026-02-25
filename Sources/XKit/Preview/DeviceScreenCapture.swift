@@ -31,8 +31,8 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
                 return """
                     Failed to start screenshot service: \
                     \(detail). Ensure Developer Disk Image is \
-                    mounted (run: ideviceimagemounter auto) \
-                    and Developer Mode is enabled on the device.
+                    mounted and Developer Mode is enabled \
+                    on the device.
                     """
             case .screenshotFailed(let detail):
                 return "Screenshot capture failed: \(detail)"
