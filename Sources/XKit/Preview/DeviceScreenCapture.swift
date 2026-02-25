@@ -2,6 +2,10 @@
 import Foundation
 import CScreenCapture
 
+// lockdownd_error_t enum constants may not be imported by
+// Swift's Clang importer on all platforms; use raw value.
+private let LOCKDOWN_OK = lockdownd_error_t(0)
+
 /// Captures screenshots from a connected iOS device using
 /// libimobiledevice's screenshotr service.
 ///
@@ -64,7 +68,7 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
         let ldErr = lockdownd_client_new_with_handshake(
             dev, &lockdownClient, "xtool-preview"
         )
-        guard ldErr == LOCKDOWN_E_SUCCESS,
+        guard ldErr == LOCKDOWN_OK,
               let lockdownClient
         else {
             throw CaptureError.lockdownFailed(
@@ -80,7 +84,7 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
         )
         lockdownd_client_free(lockdownClient)
 
-        guard svcErr == LOCKDOWN_E_SUCCESS, let service else {
+        guard svcErr == LOCKDOWN_OK, let service else {
             throw CaptureError.serviceStartFailed(
                 "error code \(svcErr.rawValue)"
             )
