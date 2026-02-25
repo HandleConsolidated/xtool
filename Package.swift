@@ -73,6 +73,13 @@ let package = Package(
     ],
     targets: [
         .systemLibrary(name: "XADI"),
+        .systemLibrary(
+            name: "CScreenCapture",
+            pkgConfig: "libimobiledevice-1.0",
+            providers: [
+                .apt(["libimobiledevice-dev"]),
+            ]
+        ),
         .target(
             name: "CXKit",
             dependencies: [
@@ -100,6 +107,7 @@ let package = Package(
                 "CXKit",
                 "XUtils",
                 .byName(name: "XADI", condition: .when(platforms: [.linux])),
+                .byName(name: "CScreenCapture", condition: .when(platforms: [.linux])),
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "SwiftyMobileDevice", package: "SwiftyMobileDevice"),
@@ -161,6 +169,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SystemPackage", package: "swift-system"),
                 .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "Version", package: "Version"),
                 .product(name: "libunxip", package: "unxip"),
             ],

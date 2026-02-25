@@ -194,6 +194,16 @@ struct DevRunCommand: AsyncParsableCommand {
 
     @OptionGroup var connectionOptions: ConnectionOptions
 
+    @Flag(
+        name: .long,
+        help: "Start screen preview after installing (mirrors device screen to browser)"
+    ) var preview = false
+
+    @Option(
+        name: .long,
+        help: "Preview server port (used with --preview)"
+    ) var previewPort: Int = 8034
+
     func run() async throws {
         let output = try await PackOperation(triple: triple, buildOptions: packOptions).run()
 
@@ -227,6 +237,27 @@ struct DevRunCommand: AsyncParsableCommand {
         } catch {
             print("\nError: \(error)")
             throw ExitCode.failure
+        }
+
+        if preview {
+            print("\nStarting preview...")
+            let captureSource: any ScreenCaptureSource
+            #if os(Linux)
+            captureSource = DeviceScreenCapture(udid: client.udid)
+            #else
+            captureSource = ProcessScreenCapture(udid: client.udid)
+            #endif
+
+            let server = PreviewServer(
+                captureSource: captureSource,
+                port: previewPort,
+                deviceName: client.deviceName,
+                deviceUDID: client.udid
+            )
+            try await server.start()
+            let url = "http://localhost:\(previewPort)"
+            print("Preview: \(url)")
+            try await server.waitUntilStopped()
         }
     }
 }

@@ -1,0 +1,4 @@
+module CScreenCapture [extern_c] {
+    header "shim.h"
+    link "imobiledevice-1.0"
+}
