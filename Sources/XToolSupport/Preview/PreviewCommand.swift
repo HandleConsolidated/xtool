@@ -13,8 +13,8 @@ struct PreviewCommand: AsyncParsableCommand {
 
             Prerequisites:
               - A connected iOS device (USB or network)
-              - DeveloperDiskImage mounted (iOS < 17) or Developer Mode \
-            enabled (iOS 17+)
+              - Developer Disk Image mounted (auto-attempted on start)
+              - Developer Mode enabled on the device (iOS 17+)
               - libimobiledevice installed (apt install libimobiledevice-utils)
 
             The preview opens at http://localhost:<port> in your browser. \

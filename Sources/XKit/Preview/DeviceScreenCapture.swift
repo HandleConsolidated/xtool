@@ -2,10 +2,13 @@
 import Foundation
 import CScreenCapture
 
-/// Captures screenshots from a connected iOS device using libimobiledevice's screenshotr service.
+/// Captures screenshots from a connected iOS device using
+/// libimobiledevice's screenshotr service.
 ///
-/// This requires the DeveloperDiskImage to be mounted on the device (iOS < 17)
-/// or Developer Mode to be enabled (iOS 17+).
+/// This requires a mounted Developer Disk Image on all iOS
+/// versions. On iOS 17+, a Personalized DDI is needed (handled
+/// automatically by `ideviceimagemounter auto`). Developer Mode
+/// must also be enabled on the device.
 public actor DeviceScreenCapture: ScreenCaptureSource {
     public enum CaptureError: LocalizedError {
         case deviceNotFound(udid: String)
@@ -22,9 +25,10 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
                 return "Lockdown connection failed: \(detail)"
             case .serviceStartFailed(let detail):
                 return """
-                    Failed to start screenshot service: \(detail). \
-                    Ensure DeveloperDiskImage is mounted (iOS < 17) \
-                    or Developer Mode is enabled (iOS 17+).
+                    Failed to start screenshot service: \
+                    \(detail). Ensure Developer Disk Image is \
+                    mounted (run: ideviceimagemounter auto) \
+                    and Developer Mode is enabled on the device.
                     """
             case .screenshotFailed(let detail):
                 return "Screenshot capture failed: \(detail)"
@@ -44,41 +48,71 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
     }
 
     public func start() async throws {
+        // Attempt to auto-mount DDI before connecting
+        try await mountDDIIfNeeded()
+
         var dev: idevice_t?
-        let devErr = idevice_new_with_options(&dev, udid, IDEVICE_LOOKUP_USBMUX)
+        let devErr = idevice_new_with_options(
+            &dev, udid, IDEVICE_LOOKUP_USBMUX
+        )
         guard devErr == IDEVICE_E_SUCCESS, let dev else {
             throw CaptureError.deviceNotFound(udid: udid)
         }
         self.device = dev
 
         var lockdownClient: lockdownd_client_t?
-        let ldErr = lockdownd_client_new_with_handshake(dev, &lockdownClient, "xtool-preview")
-        guard ldErr == LOCKDOWN_E_SUCCESS, let lockdownClient else {
-            throw CaptureError.lockdownFailed("error code \(ldErr.rawValue)")
+        let ldErr = lockdownd_client_new_with_handshake(
+            dev, &lockdownClient, "xtool-preview"
+        )
+        guard ldErr == LOCKDOWN_E_SUCCESS,
+              let lockdownClient
+        else {
+            throw CaptureError.lockdownFailed(
+                "error code \(ldErr.rawValue)"
+            )
         }
 
         var service: lockdownd_service_descriptor_t?
         let svcErr = lockdownd_start_service(
-            lockdownClient, "com.apple.mobile.screenshotr", &service
+            lockdownClient,
+            "com.apple.mobile.screenshotr",
+            &service
         )
         lockdownd_client_free(lockdownClient)
 
         guard svcErr == LOCKDOWN_E_SUCCESS, let service else {
-            throw CaptureError.serviceStartFailed("error code \(svcErr.rawValue)")
+            throw CaptureError.serviceStartFailed(
+                "error code \(svcErr.rawValue)"
+            )
         }
 
         var screenshotrClient: screenshotr_client_t?
-        let ssErr = screenshotr_client_new(dev, service, &screenshotrClient)
+        let ssErr = screenshotr_client_new(
+            dev, service, &screenshotrClient
+        )
         lockdownd_service_descriptor_free(service)
 
-        guard ssErr == SCREENSHOTR_E_SUCCESS, let screenshotrClient else {
+        guard ssErr == SCREENSHOTR_E_SUCCESS,
+              let screenshotrClient
+        else {
             throw CaptureError.serviceStartFailed(
-                "screenshotr_client_new failed with code \(ssErr.rawValue)"
+                "screenshotr_client_new failed: "
+                    + "\(ssErr.rawValue)"
             )
         }
 
         self.client = screenshotrClient
         self.isStarted = true
+    }
+
+    private func mountDDIIfNeeded() async throws {
+        do {
+            try await DDIAutoMounter.autoMount(udid: udid)
+        } catch is DDIAutoMounter.MountError {
+            // DDI mount failed — continue anyway; the
+            // screenshotr service start will give a clearer
+            // error if the DDI is truly not mounted.
+        }
     }
 
     public func captureFrame() async throws -> Data {

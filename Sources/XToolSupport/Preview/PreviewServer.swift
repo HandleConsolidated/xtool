@@ -38,14 +38,27 @@ actor BuildStatusBroadcaster {
 
 // MARK: - Frame Producer
 
-/// Captures frames from the device at a fixed interval and makes them
-/// available to all connected clients (MJPEG + WebSocket).
+/// Captures frames from the device at a fixed interval and makes
+/// them available to all connected clients (MJPEG + WebSocket).
+///
+/// Includes retry logic with exponential backoff and automatic
+/// reconnection when the capture source disconnects.
 actor FrameProducer {
     private let captureSource: any ScreenCaptureSource
     private let interval: TimeInterval
     private var captureTask: Task<Void, Never>?
     private(set) var latestFrame: Frame?
+    private(set) var captureState: CaptureState = .disconnected
     private var subscriberCount = 0
+
+    private static let maxRetries = 5
+    private static let baseRetryNs: UInt64 = 1_000_000_000
+
+    enum CaptureState: Sendable {
+        case connected
+        case reconnecting(attempt: Int)
+        case disconnected
+    }
 
     struct Frame {
         let compressed: JPEGCompressor.CompressedFrame
@@ -53,13 +66,16 @@ actor FrameProducer {
         let timestamp: ContinuousClock.Instant
     }
 
-    init(captureSource: any ScreenCaptureSource, fps: Int) {
+    init(
+        captureSource: any ScreenCaptureSource, fps: Int
+    ) {
         self.captureSource = captureSource
         self.interval = 1.0 / Double(max(fps, 1))
     }
 
     func start() async throws {
         try await captureSource.start()
+        captureState = .connected
     }
 
     func subscribe() {
@@ -80,8 +96,10 @@ actor FrameProducer {
         captureTask?.cancel()
         captureTask = nil
         try await captureSource.stop()
+        captureState = .disconnected
     }
 
+    // swiftlint:disable function_body_length
     private func startCaptureIfNeeded() {
         guard captureTask == nil else { return }
         var seq: UInt64 = latestFrame?.sequence ?? 0
@@ -89,30 +107,77 @@ actor FrameProducer {
         let interval = self.interval
 
         captureTask = Task { [weak self] in
+            var consecutiveErrors = 0
             while !Task.isCancelled {
                 do {
                     let raw = try await source.captureFrame()
-                    let compressed = JPEGCompressor.compress(raw)
+                    let compressed =
+                        JPEGCompressor.compress(raw)
                     seq += 1
                     await self?.setFrame(Frame(
                         compressed: compressed,
                         sequence: seq,
                         timestamp: .now
                     ))
+                    consecutiveErrors = 0
+                    await self?.setCaptureState(.connected)
                     try await Task.sleep(
-                        nanoseconds: UInt64(interval * 1_000_000_000)
+                        nanoseconds: UInt64(
+                            interval * 1_000_000_000
+                        )
                     )
                 } catch is CancellationError {
                     break
                 } catch {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    consecutiveErrors += 1
+                    let attempt = consecutiveErrors
+                    await self?.setCaptureState(
+                        .reconnecting(attempt: attempt)
+                    )
+
+                    if attempt > Self.maxRetries {
+                        // Try full reconnect cycle
+                        do {
+                            try await source.stop()
+                            try await Task.sleep(
+                                nanoseconds: 2_000_000_000
+                            )
+                            try await source.start()
+                            consecutiveErrors = 0
+                            await self?.setCaptureState(
+                                .connected
+                            )
+                        } catch is CancellationError {
+                            break
+                        } catch {
+                            // Exponential backoff capped at 16s
+                            let cap = min(attempt, 5)
+                            let delay = Self.baseRetryNs
+                                * UInt64(1 << cap)
+                            try? await Task.sleep(
+                                nanoseconds: delay
+                            )
+                        }
+                    } else {
+                        // Brief pause before retry
+                        let delay = Self.baseRetryNs
+                            * UInt64(1 << min(attempt - 1, 3))
+                        try? await Task.sleep(
+                            nanoseconds: delay
+                        )
+                    }
                 }
             }
         }
     }
+    // swiftlint:enable function_body_length
 
     private func setFrame(_ frame: Frame) {
         latestFrame = frame
+    }
+
+    private func setCaptureState(_ state: CaptureState) {
+        captureState = state
     }
 }
 
