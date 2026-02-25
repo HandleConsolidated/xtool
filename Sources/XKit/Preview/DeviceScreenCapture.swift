@@ -149,13 +149,5 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
         isStarted = false
     }
 
-    deinit {
-        if let client {
-            screenshotr_client_free(client)
-        }
-        if let device {
-            idevice_free(device)
-        }
-    }
 }
 #endif
