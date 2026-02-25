@@ -15,7 +15,13 @@ struct PreviewCommand: AsyncParsableCommand {
               - A connected iOS device (USB or network)
               - Developer Disk Image mounted (auto-attempted on start)
               - Developer Mode enabled on the device (iOS 17+)
-              - libimobiledevice installed (apt install libimobiledevice-utils)
+
+            Screenshot tools (at least one required):
+              - idevicescreenshot (apt install libimobiledevice-utils)
+              - pymobiledevice3 (pip3 install pymobiledevice3)
+
+            On iOS 17+, pymobiledevice3 is required with an active tunnel:
+              sudo pymobiledevice3 remote start-tunnel
 
             The preview opens at http://localhost:<port> in your browser. \
             On WSL, this URL is accessible from Windows browsers directly.
@@ -34,9 +40,17 @@ struct PreviewCommand: AsyncParsableCommand {
         help: "Target frames per second (1-30)"
     ) var fps: Int = 5
 
+    @Option(
+        name: .long,
+        help: """
+            Screenshot tool: auto, idevicescreenshot, \
+            or pymobiledevice3 (default: auto)
+            """
+    ) var captureTool: String = "auto"
+
     @Flag(
         name: .long,
-        help: "Use idevicescreenshot CLI tool instead of native capture"
+        help: "Use CLI screenshot tools instead of native capture"
     ) var useProcessCapture = false
 
     @Flag(
@@ -46,24 +60,43 @@ struct PreviewCommand: AsyncParsableCommand {
 
     func validate() throws {
         guard (1...30).contains(fps) else {
-            throw ValidationError("FPS must be between 1 and 30")
+            throw ValidationError(
+                "FPS must be between 1 and 30"
+            )
         }
         guard (1024...65535).contains(port) else {
-            throw ValidationError("Port must be between 1024 and 65535")
+            throw ValidationError(
+                "Port must be between 1024 and 65535"
+            )
+        }
+        let valid = [
+            "auto", "idevicescreenshot", "pymobiledevice3",
+        ]
+        guard valid.contains(captureTool) else {
+            throw ValidationError(
+                "capture-tool must be one of: "
+                    + valid.joined(separator: ", ")
+            )
         }
     }
 
     func run() async throws {
         let client = try await connectionOptions.client()
 
-        let displayInfo = Self.queryDisplayInfo(device: client.device)
-        let modelDesc = displayInfo.map { " (\($0.name))" } ?? ""
+        let displayInfo = Self.queryDisplayInfo(
+            device: client.device
+        )
+        let modelDesc = displayInfo.map {
+            " (\($0.name))"
+        } ?? ""
         print(
             "Starting preview for: \(client.deviceName)"
                 + "\(modelDesc) (udid: \(client.udid))"
         )
 
-        let captureSource = try createCaptureSource(udid: client.udid)
+        let captureSource = createCaptureSource(
+            udid: client.udid
+        )
 
         let server = PreviewServer(
             captureSource: captureSource,
@@ -78,7 +111,10 @@ struct PreviewCommand: AsyncParsableCommand {
 
         let url = "http://localhost:\(port)"
         print("Preview server running at \(url)")
-        print("Open this URL in your Windows browser to see the device screen.")
+        print(
+            "Open this URL in your Windows browser "
+                + "to see the device screen."
+        )
         print("Press Ctrl+C to stop.")
 
         if !noBrowser {
@@ -88,13 +124,36 @@ struct PreviewCommand: AsyncParsableCommand {
         try await server.waitUntilStopped()
     }
 
-    private func createCaptureSource(udid: String) throws -> any ScreenCaptureSource {
-        if useProcessCapture {
-            return ProcessScreenCapture(udid: udid)
+    private func createCaptureSource(
+        udid: String
+    ) -> any ScreenCaptureSource {
+        let tool: ProcessScreenCapture.CaptureTool
+        switch captureTool {
+        case "idevicescreenshot":
+            tool = .idevicescreenshot
+        case "pymobiledevice3":
+            tool = .pymobiledevice3
+        default:
+            tool = .auto
+        }
+
+        // On Linux, prefer ProcessScreenCapture which now
+        // auto-detects the best working tool (idevicescreenshot
+        // for iOS ≤16, pymobiledevice3 for iOS 17+).
+        // The native DeviceScreenCapture only works with
+        // iOS ≤16 via lockdownd.
+        if useProcessCapture || tool != .auto {
+            return ProcessScreenCapture(
+                udid: udid, tool: tool
+            )
         }
 
         #if os(Linux)
-        return DeviceScreenCapture(udid: udid)
+        // Use ProcessScreenCapture with auto-detection so
+        // it can fall back to pymobiledevice3 on iOS 17+
+        return ProcessScreenCapture(
+            udid: udid, tool: .auto
+        )
         #else
         return ProcessScreenCapture(udid: udid)
         #endif
@@ -120,22 +179,27 @@ struct PreviewCommand: AsyncParsableCommand {
     private func openBrowser(url: String) {
         #if os(macOS)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.executableURL = URL(
+            fileURLWithPath: "/usr/bin/open"
+        )
         process.arguments = [url]
         try? process.run()
         #elseif os(Linux)
-        // On WSL, try to open in Windows browser
         let candidates = [
             "/mnt/c/Windows/System32/cmd.exe",
             "/usr/bin/xdg-open",
             "/usr/bin/wslview",
         ]
         for candidate in candidates {
-            guard FileManager.default.isExecutableFile(atPath: candidate) else {
+            guard FileManager.default.isExecutableFile(
+                atPath: candidate
+            ) else {
                 continue
             }
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: candidate)
+            process.executableURL = URL(
+                fileURLWithPath: candidate
+            )
             if candidate.hasSuffix("cmd.exe") {
                 process.arguments = ["/c", "start", url]
             } else {

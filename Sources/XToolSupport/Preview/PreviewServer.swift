@@ -252,12 +252,16 @@ actor PreviewServer {
                 )
             },
             upgradePipelineHandler: { channel, _ in
-                channel.pipeline.addHandler(
-                    WebSocketStreamHandler(
-                        frameProducer: producer,
-                        fps: targetFPS
+                channel.pipeline.removeHandler(
+                    name: "httpHandler"
+                ).flatMap {
+                    channel.pipeline.addHandler(
+                        WebSocketStreamHandler(
+                            frameProducer: producer,
+                            fps: targetFPS
+                        )
                     )
-                )
+                }
             }
         )
 
@@ -282,7 +286,8 @@ actor PreviewServer {
                         deviceName: name,
                         deviceUDID: udid,
                         displayInfo: display
-                    )
+                    ),
+                    name: "httpHandler"
                 )
             }
         }

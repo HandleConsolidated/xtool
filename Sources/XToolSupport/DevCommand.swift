@@ -256,11 +256,9 @@ struct DevRunCommand: AsyncParsableCommand {
     ) async throws {
         print("\nStarting preview...")
         let captureSource: any ScreenCaptureSource
-        #if os(Linux)
-        captureSource = DeviceScreenCapture(udid: client.udid)
-        #else
-        captureSource = ProcessScreenCapture(udid: client.udid)
-        #endif
+        captureSource = ProcessScreenCapture(
+            udid: client.udid, tool: .auto
+        )
 
         let displayInfo = PreviewCommand.queryDisplayInfo(
             device: client.device
