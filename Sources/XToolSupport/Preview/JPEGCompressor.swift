@@ -134,7 +134,7 @@ enum JPEGCompressor {
                 pixelFormat.rawValue,
                 &jpegBuf,
                 &jpegSize,
-                TJSAMP_420.rawValue,
+                Int32(TJSAMP_420.rawValue),
                 Int32(quality),
                 Int32(TJFLAG_FASTDCT)
             )

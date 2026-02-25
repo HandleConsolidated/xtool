@@ -235,7 +235,7 @@ actor PreviewServer {
         let udid = deviceUDID
         let display = displayInfo
 
-        let wsUpgrader = NIOWebSocketServerUpgrader(
+        nonisolated(unsafe) let wsUpgrader = NIOWebSocketServerUpgrader(
             shouldUpgrade: { channel, head in
                 guard head.uri == "/ws" else {
                     return channel.eventLoop.makeSucceededFuture(nil)
@@ -360,6 +360,7 @@ private final class WebSocketStreamHandler:
     }
 
     private func startStreaming(context: ChannelHandlerContext) {
+        nonisolated(unsafe) let context = context
         let producer = frameProducer
         let interval = 1.0 / Double(fps)
         var lastSeq: UInt64 = 0
@@ -496,6 +497,7 @@ private final class PreviewHTTPHandler:
     private func startMJPEGStream(
         context: ChannelHandlerContext
     ) {
+        nonisolated(unsafe) let context = context
         isStreaming = true
         Task { await frameProducer.subscribe() }
 
@@ -541,6 +543,7 @@ private final class PreviewHTTPHandler:
                         buffer.writeString(hdr)
                         buffer.writeBytes(d)
                         buffer.writeString("\r\n")
+                        let sendBuffer = buffer
 
                         let promise =
                             context.eventLoop.makePromise(
@@ -549,7 +552,7 @@ private final class PreviewHTTPHandler:
                         context.eventLoop.execute {
                             context.writeAndFlush(
                                 self.wrapOutboundOut(
-                                    .body(.byteBuffer(buffer))
+                                    .body(.byteBuffer(sendBuffer))
                                 ),
                                 promise: promise
                             )
@@ -572,6 +575,7 @@ private final class PreviewHTTPHandler:
     private func serveSingleFrame(
         context: ChannelHandlerContext
     ) {
+        nonisolated(unsafe) let context = context
         let producer = frameProducer
         Task {
             await producer.subscribe()
@@ -599,11 +603,12 @@ private final class PreviewHTTPHandler:
                 capacity: d.count
             )
             buffer.writeBytes(d)
+            let sendBuffer = buffer
 
             let ct = frame.compressed.contentType
             let headers = HTTPHeaders([
                 ("Content-Type", ct),
-                ("Content-Length", "\(buffer.readableBytes)"),
+                ("Content-Length", "\(sendBuffer.readableBytes)"),
                 ("Cache-Control", "no-cache"),
             ])
             let head = HTTPResponseHead(
@@ -614,7 +619,9 @@ private final class PreviewHTTPHandler:
                     self.wrapOutboundOut(.head(head)), promise: nil
                 )
                 context.write(
-                    self.wrapOutboundOut(.body(.byteBuffer(buffer))),
+                    self.wrapOutboundOut(
+                        .body(.byteBuffer(sendBuffer))
+                    ),
                     promise: nil
                 )
                 context.writeAndFlush(
@@ -654,6 +661,7 @@ private final class PreviewHTTPHandler:
     private func startSSEStream(
         context: ChannelHandlerContext
     ) {
+        nonisolated(unsafe) let context = context
         let headers = HTTPHeaders([
             ("Content-Type", "text/event-stream"),
             ("Cache-Control", "no-cache"),
@@ -683,15 +691,16 @@ private final class PreviewHTTPHandler:
                             capacity: line.utf8.count
                         )
                     buffer.writeString(line)
+                    let sendBuffer = buffer
+                    guard let self else { break }
                     let promise =
                         context.eventLoop.makePromise(
                             of: Void.self
                         )
                     context.eventLoop.execute {
-                        guard let self else { return }
                         context.writeAndFlush(
                             self.wrapOutboundOut(
-                                .body(.byteBuffer(buffer))
+                                .body(.byteBuffer(sendBuffer))
                             ),
                             promise: promise
                         )
