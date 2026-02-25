@@ -20,7 +20,9 @@ enum DDIAutoMounter {
             switch self {
             case .toolNotFound:
                 return """
-                    ideviceimagemounter not found. Install with: \
+                    ideviceimagemounter not found. \
+                    Build with 'make linux-dist' to bundle it, \
+                    or install with: \
                     apt install libimobiledevice-utils
                     """
             case .alreadyMounted:
@@ -137,6 +139,11 @@ enum DDIAutoMounter {
             .environment["APPDIR"] {
             paths.append("\(appDir)/usr/bin/\(name)")
         }
+        // Check next to current executable
+        let execDir = URL(
+            fileURLWithPath: CommandLine.arguments[0]
+        ).deletingLastPathComponent().path
+        paths.append("\(execDir)/\(name)")
         paths += [
             "/usr/bin/\(name)",
             "/usr/local/bin/\(name)",

@@ -112,10 +112,11 @@ public actor DeviceScreenCapture: ScreenCaptureSource {
     private func mountDDIIfNeeded() async throws {
         do {
             try await DDIAutoMounter.autoMount(udid: udid)
-        } catch is DDIAutoMounter.MountError {
-            // DDI mount failed — continue anyway; the
-            // screenshotr service start will give a clearer
-            // error if the DDI is truly not mounted.
+        } catch let error as DDIAutoMounter.MountError {
+            print(
+                "warning: DDI auto-mount failed: "
+                    + "\(error.localizedDescription)"
+            )
         }
     }
 

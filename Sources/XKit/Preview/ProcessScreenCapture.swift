@@ -108,6 +108,11 @@ public actor ProcessScreenCapture: ScreenCaptureSource {
             .environment["APPDIR"] {
             searchPaths.append("\(appDir)/usr/bin")
         }
+        // Check next to current executable
+        let execDir = URL(
+            fileURLWithPath: CommandLine.arguments[0]
+        ).deletingLastPathComponent().path
+        searchPaths.append(execDir)
         searchPaths += [
             "/usr/bin",
             "/usr/local/bin",
