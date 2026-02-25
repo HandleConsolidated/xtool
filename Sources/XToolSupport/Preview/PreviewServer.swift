@@ -5,6 +5,37 @@ import NIOHTTP1
 import NIOWebSocket
 import XKit
 
+// MARK: - Build Status
+
+/// Tracks build/install status for live reload SSE broadcasting.
+actor BuildStatusBroadcaster {
+    enum Status: String, Sendable, Encodable {
+        case idle
+        case building
+        case installing
+        case ready
+        case error
+    }
+
+    struct Event: Sendable {
+        let status: Status
+        let message: String
+        let sequence: UInt64
+    }
+
+    private(set) var latest = Event(
+        status: .idle, message: "", sequence: 0
+    )
+
+    func update(_ status: Status, message: String = "") {
+        latest = Event(
+            status: status,
+            message: message,
+            sequence: latest.sequence + 1
+        )
+    }
+}
+
 // MARK: - Frame Producer
 
 /// Captures frames from the device at a fixed interval and makes them
@@ -97,6 +128,7 @@ actor FrameProducer {
 /// - `GET /ws`     -> WebSocket upgrade for binary frame push
 actor PreviewServer {
     let frameProducer: FrameProducer
+    let buildStatus: BuildStatusBroadcaster
     let host: String
     let port: Int
     let fps: Int
@@ -118,6 +150,7 @@ actor PreviewServer {
         self.frameProducer = FrameProducer(
             captureSource: captureSource, fps: fps
         )
+        self.buildStatus = BuildStatusBroadcaster()
         self.host = host
         self.port = port
         self.fps = fps
@@ -131,6 +164,7 @@ actor PreviewServer {
         try await frameProducer.start()
 
         let producer = frameProducer
+        let statusBroadcaster = buildStatus
         let targetFPS = fps
         let name = deviceName
         let udid = deviceUDID
@@ -171,6 +205,7 @@ actor PreviewServer {
                 channel.pipeline.addHandler(
                     PreviewHTTPHandler(
                         frameProducer: producer,
+                        buildStatus: statusBroadcaster,
                         fps: targetFPS,
                         deviceName: name,
                         deviceUDID: udid,
@@ -193,6 +228,13 @@ actor PreviewServer {
     func stop() async throws {
         try await channel?.close()
         try await frameProducer.stop()
+    }
+
+    func updateBuildStatus(
+        _ status: BuildStatusBroadcaster.Status,
+        message: String = ""
+    ) async {
+        await buildStatus.update(status, message: message)
     }
 }
 
@@ -307,6 +349,7 @@ private final class PreviewHTTPHandler:
     typealias OutboundOut = HTTPServerResponsePart
 
     private let frameProducer: FrameProducer
+    private let buildStatus: BuildStatusBroadcaster
     private let fps: Int
     private let deviceName: String
     private let deviceUDID: String
@@ -315,15 +358,18 @@ private final class PreviewHTTPHandler:
 
     private var isStreaming = false
     private var streamTask: Task<Void, Never>?
+    private var sseTask: Task<Void, Never>?
 
     init(
         frameProducer: FrameProducer,
+        buildStatus: BuildStatusBroadcaster,
         fps: Int,
         deviceName: String,
         deviceUDID: String,
         displayInfo: DeviceDisplayInfo
     ) {
         self.frameProducer = frameProducer
+        self.buildStatus = buildStatus
         self.fps = fps
         self.deviceName = deviceName
         self.deviceUDID = deviceUDID
@@ -348,6 +394,8 @@ private final class PreviewHTTPHandler:
             serveSingleFrame(context: context)
         case "/api/info":
             serveDeviceInfo(context: context)
+        case "/api/events":
+            startSSEStream(context: context)
         default:
             serve404(context: context)
         }
@@ -360,6 +408,8 @@ private final class PreviewHTTPHandler:
             isStreaming = false
             Task { await frameProducer.unsubscribe() }
         }
+        sseTask?.cancel()
+        sseTask = nil
         context.fireChannelInactive()
     }
 
@@ -532,6 +582,75 @@ private final class PreviewHTTPHandler:
             text: json,
             contentType: "application/json"
         )
+    }
+
+    // MARK: - SSE Stream
+
+    private func startSSEStream(
+        context: ChannelHandlerContext
+    ) {
+        let headers = HTTPHeaders([
+            ("Content-Type", "text/event-stream"),
+            ("Cache-Control", "no-cache"),
+            ("Connection", "keep-alive"),
+        ])
+        let head = HTTPResponseHead(
+            version: .http1_1, status: .ok, headers: headers
+        )
+        context.writeAndFlush(
+            wrapOutboundOut(.head(head)), promise: nil
+        )
+
+        let broadcaster = buildStatus
+        sseTask = Task { [weak self] in
+            var lastSeq: UInt64 = 0
+            while !Task.isCancelled {
+                let event = await broadcaster.latest
+                if event.sequence > lastSeq {
+                    lastSeq = event.sequence
+                    let msg = Self.escapeJSON(event.message)
+                    let json = "{\"status\":\""
+                        + "\(event.status.rawValue)\","
+                        + "\"message\":\"\(msg)\"}"
+                    let line = "data: \(json)\n\n"
+                    var buffer =
+                        context.channel.allocator.buffer(
+                            capacity: line.utf8.count
+                        )
+                    buffer.writeString(line)
+                    let promise =
+                        context.eventLoop.makePromise(
+                            of: Void.self
+                        )
+                    context.eventLoop.execute {
+                        guard let self else { return }
+                        context.writeAndFlush(
+                            self.wrapOutboundOut(
+                                .body(.byteBuffer(buffer))
+                            ),
+                            promise: promise
+                        )
+                    }
+                    do {
+                        try await promise.futureResult.get()
+                    } catch {
+                        break
+                    }
+                }
+                try? await Task.sleep(
+                    nanoseconds: 250_000_000
+                )
+            }
+        }
+    }
+
+    private static func escapeJSON(
+        _ string: String
+    ) -> String {
+        string
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
     }
 
     // MARK: - Helpers

@@ -205,6 +205,11 @@ struct DevRunCommand: AsyncParsableCommand {
         help: "Preview server port (used with --preview)"
     ) var previewPort: Int = 8034
 
+    @Flag(
+        name: .long,
+        help: "Disable live reload file watching (used with --preview)"
+    ) var noWatch = false
+
     func run() async throws {
         let output = try await PackOperation(triple: triple, buildOptions: packOptions).run()
 
@@ -241,28 +246,114 @@ struct DevRunCommand: AsyncParsableCommand {
         }
 
         if preview {
-            print("\nStarting preview...")
-            let captureSource: any ScreenCaptureSource
-            #if os(Linux)
-            captureSource = DeviceScreenCapture(udid: client.udid)
-            #else
-            captureSource = ProcessScreenCapture(udid: client.udid)
-            #endif
+            try await startPreview(client: client)
+        }
+    }
 
-            let displayInfo = PreviewCommand.queryDisplayInfo(
-                device: client.device
+    // swiftlint:disable function_body_length
+    private func startPreview(
+        client: ClientDevice
+    ) async throws {
+        print("\nStarting preview...")
+        let captureSource: any ScreenCaptureSource
+        #if os(Linux)
+        captureSource = DeviceScreenCapture(udid: client.udid)
+        #else
+        captureSource = ProcessScreenCapture(udid: client.udid)
+        #endif
+
+        let displayInfo = PreviewCommand.queryDisplayInfo(
+            device: client.device
+        )
+        let server = PreviewServer(
+            captureSource: captureSource,
+            port: previewPort,
+            deviceName: client.deviceName,
+            deviceUDID: client.udid,
+            displayInfo: displayInfo
+        )
+        try await server.start()
+
+        let url = "http://localhost:\(previewPort)"
+        print("Preview: \(url)")
+        await server.updateBuildStatus(.ready)
+
+        if !noWatch {
+            let projectDir = URL(
+                fileURLWithPath:
+                    FileManager.default.currentDirectoryPath
             )
-            let server = PreviewServer(
-                captureSource: captureSource,
-                port: previewPort,
-                deviceName: client.deviceName,
-                deviceUDID: client.udid,
-                displayInfo: displayInfo
-            )
-            try await server.start()
-            let url = "http://localhost:\(previewPort)"
-            print("Preview: \(url)")
+            let watcher = FileWatcher(directory: projectDir)
+
+            let config = packOptions.configuration
+            let tri = triple
+            let udid = client.udid
+            let connType = client.connectionType
+
+            print("Watching for file changes...")
+            print("Press Ctrl+C to stop.\n")
+
+            await watcher.watch {
+                await Self.rebuildAndInstall(
+                    server: server,
+                    configuration: config,
+                    triple: tri,
+                    udid: udid,
+                    connectionType: connType
+                )
+            }
+
             try await server.waitUntilStopped()
+            await watcher.stop()
+        } else {
+            print("Press Ctrl+C to stop.\n")
+            try await server.waitUntilStopped()
+        }
+    }
+    // swiftlint:enable function_body_length
+
+    private static func rebuildAndInstall(
+        server: PreviewServer,
+        configuration: BuildConfiguration,
+        triple: String?,
+        udid: String,
+        connectionType: ConnectionType
+    ) async {
+        print("\n--- File change detected ---")
+        await server.updateBuildStatus(.building)
+
+        do {
+            print("Rebuilding...")
+            let opts = PackOperation.BuildOptions(
+                configuration: configuration
+            )
+            let newOutput = try await PackOperation(
+                triple: triple, buildOptions: opts
+            ).run()
+
+            print("\nInstalling...")
+            await server.updateBuildStatus(.installing)
+
+            let token = try AuthToken.saved()
+            let delegate = XToolInstallerDelegate()
+            let newInstaller = IntegratedInstaller(
+                udid: udid,
+                lookupMode: .only(connectionType),
+                auth: try token.authData(),
+                configureDevice: false,
+                delegate: delegate
+            )
+            try await newInstaller.install(app: newOutput)
+
+            print("\nApp updated!")
+            await server.updateBuildStatus(
+                .ready, message: "Updated"
+            )
+        } catch {
+            print("\nRebuild failed: \(error)")
+            await server.updateBuildStatus(
+                .error, message: "\(error)"
+            )
         }
     }
 }

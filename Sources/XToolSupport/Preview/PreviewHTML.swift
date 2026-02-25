@@ -107,6 +107,52 @@ enum PreviewHTML {
         .transport-badge.mjpeg{background:rgba(48,209,88,0.2);color:#30d158}
         .branding{font-size:11px;color:#555;letter-spacing:0.5px}
         .size-display{opacity:0.6}
+
+        /* Toolbar */
+        .toolbar{
+          display:flex;align-items:center;gap:8px;
+          padding:8px 12px;background:rgba(255,255,255,0.05);
+          border-radius:12px;
+        }
+        .toolbar button{
+          padding:6px 12px;background:rgba(255,255,255,0.08);
+          color:#e0e0e0;border:none;border-radius:8px;
+          font-size:12px;cursor:pointer;transition:background 0.2s;
+          display:flex;align-items:center;gap:4px;
+        }
+        .toolbar button:hover{background:rgba(255,255,255,0.15)}
+        .toolbar .sep{
+          width:1px;height:20px;background:rgba(255,255,255,0.1);
+        }
+        .zoom-controls{display:flex;align-items:center;gap:4px}
+        #zoom-level{
+          font-size:12px;min-width:40px;text-align:center;
+          color:#888;
+        }
+
+        /* Build status overlay */
+        .build-overlay{
+          position:absolute;top:0;left:0;width:100%;height:100%;
+          display:none;flex-direction:column;justify-content:center;
+          align-items:center;gap:12px;
+          background:rgba(0,0,0,0.7);z-index:8;
+          border-radius:\(frameCSS.screenRadius)px;
+        }
+        .build-overlay.visible{display:flex}
+        .build-overlay .build-spinner{
+          width:32px;height:32px;
+          border:3px solid rgba(255,255,255,0.1);
+          border-top-color:#ff9f0a;border-radius:50%;
+          animation:spin 0.8s linear infinite;
+        }
+        #build-status-text{
+          color:#ff9f0a;font-size:14px;font-weight:600;
+        }
+        .build-overlay.error #build-status-text{color:#ff453a}
+        .build-overlay.success #build-status-text{color:#30d158}
+        .build-overlay.success .build-spinner{
+          border-top-color:#30d158;animation:none;
+        }
         </style>
         </head>
         <body>
@@ -123,6 +169,10 @@ enum PreviewHTML {
                 <span id="error-message">Connection lost</span>
                 <button onclick="reconnect()">Reconnect</button>
               </div>
+              <div class="build-overlay" id="build-overlay">
+                <div class="build-spinner"></div>
+                <span id="build-status-text">Building...</span>
+              </div>
             </div>
           </div>
 
@@ -132,6 +182,24 @@ enum PreviewHTML {
             <span class="transport-badge" id="transport">--</span>
             <span class="fps-counter" id="fps-display">-- fps</span>
             <span class="size-display" id="frame-size">--</span>
+          </div>
+          <div class="toolbar">
+            <button onclick="takeScreenshot()" title="Screenshot (S)">
+              \(Self.screenshotSVG) Save
+            </button>
+            <div class="sep"></div>
+            <div class="zoom-controls">
+              <button onclick="setZoom(0)" title="Fit to window (F)">
+                Fit
+              </button>
+              <button onclick="changeZoom(-0.25)" title="Zoom out (-)">
+                &minus;
+              </button>
+              <span id="zoom-level">Fit</span>
+              <button onclick="changeZoom(0.25)" title="Zoom in (+)">
+                +
+              </button>
+            </div>
           </div>
           <div class="branding">xtool preview</div>
         </div>
@@ -243,12 +311,123 @@ enum PreviewHTML {
           connectWS();
         }
 
-        // Start with WebSocket
-        connectWS();
+        // --- Screenshot ---
+        function takeScreenshot() {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          c.getContext('2d').drawImage(img, 0, 0);
+          c.toBlob(function(blob) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'screenshot-' + Date.now() + '.png';
+            a.click();
+            URL.revokeObjectURL(a.href);
+          }, 'image/png');
+        }
 
+        // --- Zoom ---
+        let currentZoom = 0;
+        const deviceFrame = document.getElementById('device-frame');
+
+        function setZoom(level) {
+          currentZoom = level;
+          applyZoom();
+        }
+        function changeZoom(delta) {
+          if (currentZoom === 0) currentZoom = 1;
+          currentZoom = Math.max(0.25,
+            Math.min(3, currentZoom + delta));
+          applyZoom();
+        }
+        function applyZoom() {
+          const el = document.getElementById('zoom-level');
+          if (currentZoom === 0) {
+            deviceFrame.style.transform = '';
+            el.textContent = 'Fit';
+          } else {
+            deviceFrame.style.transform =
+              'scale(' + currentZoom + ')';
+            el.textContent =
+              Math.round(currentZoom * 100) + '%';
+          }
+        }
+
+        // --- Build status (SSE) ---
+        const buildOverlay =
+          document.getElementById('build-overlay');
+        const buildText =
+          document.getElementById('build-status-text');
+        let buildHideTimer = null;
+
+        function connectSSE() {
+          const es = new EventSource('/api/events');
+          es.onmessage = function(e) {
+            const d = JSON.parse(e.data);
+            handleBuildStatus(d.status, d.message);
+          };
+          es.onerror = function() {
+            es.close();
+            setTimeout(connectSSE, 5000);
+          };
+        }
+
+        function handleBuildStatus(status, message) {
+          if (buildHideTimer) {
+            clearTimeout(buildHideTimer);
+            buildHideTimer = null;
+          }
+          buildOverlay.className = 'build-overlay';
+          switch (status) {
+          case 'building':
+            buildOverlay.classList.add('visible');
+            buildText.textContent = 'Building...';
+            break;
+          case 'installing':
+            buildOverlay.classList.add('visible');
+            buildText.textContent = 'Installing...';
+            break;
+          case 'ready':
+            if (message) {
+              buildOverlay.classList.add('visible','success');
+              buildText.textContent = message;
+              buildHideTimer = setTimeout(function() {
+                buildOverlay.classList.remove(
+                  'visible','success');
+              }, 2000);
+            } else {
+              buildOverlay.classList.remove('visible');
+            }
+            break;
+          case 'error':
+            buildOverlay.classList.add('visible','error');
+            buildText.textContent =
+              'Error: ' + (message || 'Build failed');
+            buildHideTimer = setTimeout(function() {
+              buildOverlay.classList.remove(
+                'visible','error');
+            }, 8000);
+            break;
+          default:
+            buildOverlay.classList.remove('visible');
+          }
+        }
+
+        // --- Keyboard shortcuts ---
         document.addEventListener('keydown', function(e) {
-          if (e.key === 'r' || e.key === 'R') reconnect();
+          if (e.target.tagName === 'INPUT') return;
+          switch (e.key) {
+          case 'r': case 'R': reconnect(); break;
+          case 's': case 'S': takeScreenshot(); break;
+          case 'f': case 'F': setZoom(0); break;
+          case '+': case '=': changeZoom(0.25); break;
+          case '-': changeZoom(-0.25); break;
+          }
         });
+
+        // Start connections
+        connectWS();
+        connectSSE();
         </script>
         </body>
         </html>
@@ -417,6 +596,15 @@ enum PreviewHTML {
     }
 
     // MARK: - Helpers
+
+    // swiftlint:disable line_length
+    private static let screenshotSVG = """
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" \
+    stroke="currentColor" stroke-width="2"><rect x="3" y="3" \
+    width="18" height="18" rx="2"/><circle cx="12" cy="12" \
+    r="3"/></svg>
+    """
+    // swiftlint:enable line_length
 
     private static func escapeHTML(_ string: String) -> String {
         string
