@@ -1,6 +1,7 @@
 import Foundation
 import ArgumentParser
 import PackLib
+import SwiftyMobileDevice
 import XKit
 import Dependencies
 import XUtils
@@ -248,11 +249,15 @@ struct DevRunCommand: AsyncParsableCommand {
             captureSource = ProcessScreenCapture(udid: client.udid)
             #endif
 
+            let displayInfo = PreviewCommand.queryDisplayInfo(
+                device: client.device
+            )
             let server = PreviewServer(
                 captureSource: captureSource,
                 port: previewPort,
                 deviceName: client.deviceName,
-                deviceUDID: client.udid
+                deviceUDID: client.udid,
+                displayInfo: displayInfo
             )
             try await server.start()
             let url = "http://localhost:\(previewPort)"

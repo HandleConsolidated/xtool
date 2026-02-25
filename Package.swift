@@ -80,6 +80,7 @@ let package = Package(
                 .apt(["libimobiledevice-dev"]),
             ]
         ),
+        .systemLibrary(name: "CTurboJPEG"),
         .target(
             name: "CXKit",
             dependencies: [
@@ -166,10 +167,15 @@ let package = Package(
                 "SwiftyMobileDevice",
                 "XKit",
                 "PackLib",
+                .byName(
+                    name: "CTurboJPEG",
+                    condition: .when(platforms: [.linux])
+                ),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SystemPackage", package: "swift-system"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOWebSocket", package: "swift-nio"),
                 .product(name: "Version", package: "Version"),
                 .product(name: "libunxip", package: "unxip"),
             ],

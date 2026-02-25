@@ -1,5 +1,6 @@
 import Foundation
 import ArgumentParser
+import SwiftyMobileDevice
 import XKit
 
 struct PreviewCommand: AsyncParsableCommand {
@@ -55,7 +56,12 @@ struct PreviewCommand: AsyncParsableCommand {
     func run() async throws {
         let client = try await connectionOptions.client()
 
-        print("Starting preview for: \(client.deviceName) (udid: \(client.udid))")
+        let displayInfo = Self.queryDisplayInfo(device: client.device)
+        let modelDesc = displayInfo.map { " (\($0.name))" } ?? ""
+        print(
+            "Starting preview for: \(client.deviceName)"
+                + "\(modelDesc) (udid: \(client.udid))"
+        )
 
         let captureSource = try createCaptureSource(udid: client.udid)
 
@@ -64,7 +70,8 @@ struct PreviewCommand: AsyncParsableCommand {
             port: port,
             fps: fps,
             deviceName: client.deviceName,
-            deviceUDID: client.udid
+            deviceUDID: client.udid,
+            displayInfo: displayInfo
         )
 
         try await server.start()
@@ -91,6 +98,23 @@ struct PreviewCommand: AsyncParsableCommand {
         #else
         return ProcessScreenCapture(udid: udid)
         #endif
+    }
+
+    static func queryDisplayInfo(
+        device: Device
+    ) -> DeviceDisplayInfo? {
+        guard let lockdown = try? LockdownClient(
+            device: device,
+            label: "xtool-preview",
+            performHandshake: false
+        ) else { return nil }
+        guard let productType = try? lockdown.value(
+            ofType: String.self, forDomain: nil,
+            key: "ProductType"
+        ) else { return nil }
+        return DeviceModelDatabase.displayInfo(
+            forProductType: productType
+        )
     }
 
     private func openBrowser(url: String) {

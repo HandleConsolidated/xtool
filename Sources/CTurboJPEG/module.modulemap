@@ -1,0 +1,4 @@
+module CTurboJPEG [extern_c] {
+    header "shim.h"
+    link "turbojpeg"
+}
