@@ -1,0 +1,4 @@
+version: 1
+bundleID: com.xtool.example.MonsterBattle
+product: MonsterBattle
+infoPath: App/Info.plist
