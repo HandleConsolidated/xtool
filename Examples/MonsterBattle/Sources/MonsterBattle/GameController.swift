@@ -246,7 +246,8 @@ public final class GameController: ObservableObject {
 
         case .npcEncounter(let npcID):
             world = nextWorld
-            if let (npc, mapOfNPC) = locateNPC(id: npcID), let trainerParty = npc.trainer {
+            guard let npc = locateNPC(id: npcID) else { break }
+            if let trainerParty = npc.trainer {
                 let party = buildTrainerParty(from: trainerParty)
                 pendingBattle = PendingBattle(
                     kind: .trainer(
@@ -257,13 +258,9 @@ public final class GameController: ObservableObject {
                     ),
                     seed: rng.next()
                 )
-                _ = mapOfNPC
                 scene = .battle
             } else {
-                // Non-trainer NPC: show their dialog.
-                if let (npc, _) = locateNPC(id: npcID) {
-                    pushDialog(npc.dialog)
-                }
+                pushDialog(npc.dialog)
             }
         }
     }
@@ -281,10 +278,10 @@ public final class GameController: ObservableObject {
         world.mapState[world.currentMapID] = mapState
     }
 
-    private func locateNPC(id: String) -> (NPC, GameMap)? {
+    private func locateNPC(id: String) -> NPC? {
         for map in MapData.all {
             if let npc = map.npcs.first(where: { $0.id == id }) {
-                return (npc, map)
+                return npc
             }
         }
         return nil
