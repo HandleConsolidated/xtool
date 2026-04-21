@@ -10,12 +10,12 @@ struct BattleView: View {
     @EnvironmentObject var game: GameController
 
     @State private var mode: PanelMode = .root
+    @State private var showingPartySheet: Bool = false
 
     enum PanelMode: Equatable {
         case root
         case fight
         case bag
-        case partySwitch
     }
 
     var body: some View {
@@ -38,14 +38,30 @@ struct BattleView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        // On each state change, auto-switch in the next live monster when
-        // the engine asks us to. Also reset the panel mode to root so the
-        // player isn't stuck on a stale fight submenu.
+        // When the engine asks for a forced switch after a faint, pop the
+        // party picker so the player can choose who comes in.
         .onChange(of: controller.state.awaitingPlayerSwitch) { awaiting in
             if awaiting {
                 mode = .root
-                autoSwitchToNextAlive()
+                showingPartySheet = true
             }
+        }
+        .sheet(isPresented: $showingPartySheet) {
+            BattlePartySheet(
+                controller: controller,
+                forcedSwitch: controller.state.awaitingPlayerSwitch,
+                onPick: { partyIndex in
+                    showingPartySheet = false
+                    controller.submit(playerAction: .switchMonster(partyIndex: partyIndex))
+                },
+                onCancel: {
+                    // Only allow cancel for a non-forced switch.
+                    if !controller.state.awaitingPlayerSwitch {
+                        showingPartySheet = false
+                    }
+                }
+            )
+            .interactiveDismissDisabled(controller.state.awaitingPlayerSwitch)
         }
     }
 
@@ -194,7 +210,7 @@ struct BattleView: View {
         return LazyVGrid(columns: grid, spacing: 10) {
             actionButton(title: "Fight",  icon: "flame") { mode = .fight }
             actionButton(title: "Bag",    icon: "bag")   { mode = .bag }
-            actionButton(title: "Party",  icon: "person.3") { autoSwitchToNextAlive() }
+            actionButton(title: "Party",  icon: "person.3") { showingPartySheet = true }
             actionButton(title: "Run",    icon: "figure.run") {
                 controller.submit(playerAction: .run)
             }
@@ -357,18 +373,6 @@ struct BattleView: View {
         CreatureDex.species(side.combatant.monster.speciesID)
     }
 
-    /// Whenever the engine is waiting on a forced switch, or the player
-    /// taps "Party" from the root, pick the next alive party member and
-    /// submit a switch. (Full party-selection UI is deferred; see the
-    /// report — this is the v1 auto-switch fallback.)
-    private func autoSwitchToNextAlive() {
-        let activeIndex = controller.state.player.activeIndex
-        let party = controller.state.player.party
-        if let next = party.indices.first(where: { $0 != activeIndex && !party[$0].isFainted }) {
-            controller.submit(playerAction: .switchMonster(partyIndex: next))
-        }
-    }
-
     private var background: LinearGradient {
         LinearGradient(
             colors: [
@@ -466,6 +470,64 @@ enum BattleEventFormatter {
             return "Foe's \(label)"
         }
         return "Creature"
+    }
+}
+
+/// Sheet presented when the player taps "Party" in battle, or when the
+/// engine demands a forced switch after a faint. The forced variant
+/// hides the "Cancel" button and blocks interactive dismissal.
+private struct BattlePartySheet: View {
+    @ObservedObject var controller: BattleController
+    let forcedSwitch: Bool
+    let onPick: (Int) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(Array(controller.state.player.party.enumerated()), id: \.element.id) { index, monster in
+                    let species = CreatureDex.species(monster.speciesID)
+                    let isActive = index == controller.state.player.activeIndex
+                    let isFainted = monster.isFainted
+                    let disabled = isActive || isFainted
+                    Button {
+                        guard !disabled else { return }
+                        onPick(index)
+                    } label: {
+                        row(monster: monster, species: species, isActive: isActive, isFainted: isFainted)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(disabled)
+                    .opacity(disabled ? 0.5 : 1.0)
+                }
+            }
+            .navigationTitle(forcedSwitch ? "Pick next monster" : "Switch monster")
+            .toolbar {
+                if !forcedSwitch {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel", action: onCancel)
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(monster: MonsterInstance, species: CreatureSpecies, isActive: Bool, isFainted: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(species.emoji).font(.title2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(monster.displayName(using: species)).font(.headline)
+                    Text("Lv\(monster.level)").font(.caption).foregroundStyle(.secondary)
+                    StatusChip(status: monster.status)
+                    if isActive { Text("In play").font(.caption2).foregroundStyle(.secondary) }
+                    if isFainted { Text("Fainted").font(.caption2).foregroundStyle(.red) }
+                }
+                HPBar(current: monster.currentHP, max: monster.maxHP(using: species))
+                    .frame(height: 8)
+            }
+        }
+        .padding(.vertical, 6)
     }
 }
 #endif

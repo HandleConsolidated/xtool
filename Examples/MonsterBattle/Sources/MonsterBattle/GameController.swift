@@ -246,20 +246,22 @@ public final class GameController: ObservableObject {
 
         case .npcEncounter(let npcID):
             world = nextWorld
-            guard let npc = locateNPC(id: npcID) else { break }
-            if let trainerParty = npc.trainer {
-                let party = buildTrainerParty(from: trainerParty)
-                pendingBattle = PendingBattle(
-                    kind: .trainer(
-                        npcID: npc.id,
-                        classTitle: trainerParty.classTitle,
-                        name: npc.name,
-                        party: party
-                    ),
-                    seed: rng.next()
-                )
-                scene = .battle
-            } else {
+            guard let npc = locateNPC(id: npcID), let trainerParty = npc.trainer else { break }
+            let party = buildTrainerParty(from: trainerParty)
+            pendingBattle = PendingBattle(
+                kind: .trainer(
+                    npcID: npc.id,
+                    classTitle: trainerParty.classTitle,
+                    name: npc.name,
+                    party: party
+                ),
+                seed: rng.next()
+            )
+            scene = .battle
+
+        case .npcTalk(let npcID):
+            world = nextWorld
+            if let npc = locateNPC(id: npcID), !npc.dialog.isEmpty {
                 pushDialog(npc.dialog)
             }
         }

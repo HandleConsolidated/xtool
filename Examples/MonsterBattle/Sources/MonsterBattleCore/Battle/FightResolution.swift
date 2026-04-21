@@ -38,12 +38,13 @@ enum FightResolution {
         state.appendEvent(.moveUsed(attackerID: attackerID, move: move.name))
 
         // Accuracy check.
+        let defenderForAccuracy = combatant(side: attacker.other, state: state)
         var hit = false
         state.withRNG { rng in
             hit = AccuracyCheck.hits(
                 move: move,
                 attacker: attackerCombatant,
-                defender: combatant(side: attacker.other, state: state),
+                defender: defenderForAccuracy,
                 rng: &rng
             )
         }

@@ -22,6 +22,8 @@ public enum StepEvent: Sendable {
     case warped(Warp)
     case wildEncounter(MonsterInstance)
     case npcEncounter(npcID: String)
+    /// A non-trainer NPC is facing the player; show their dialog.
+    case npcTalk(npcID: String)
 }
 
 /// Pure computation of the next player state for one step in a given
@@ -60,6 +62,15 @@ public enum MovementResolver {
                     newPosition: currentPosition,
                     newFacing: direction,
                     event: .npcEncounter(npcID: npc.id)
+                )
+            }
+            // Non-trainer NPC (or defeated trainer): talk if they have
+            // dialog, otherwise just block like a wall.
+            if !npc.dialog.isEmpty {
+                return StepResult(
+                    newPosition: currentPosition,
+                    newFacing: direction,
+                    event: .npcTalk(npcID: npc.id)
                 )
             }
             return StepResult(

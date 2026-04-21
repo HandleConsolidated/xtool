@@ -108,16 +108,17 @@ enum ItemResolution {
             state.appendEvent(.message("Can't use \(item.name) here."))
             return
         }
+        let target = state.opponent.combatant
         var result: (caught: Bool, shakes: Int) = (false, 0)
         state.withRNG { rng in
             result = CaptureCalculator.attempt(
-                on: state.opponent.combatant,
+                on: target,
                 using: item,
                 rng: &rng
             )
         }
         if result.caught {
-            state.appendEvent(.caughtCreature(speciesID: state.opponent.combatant.species.id))
+            state.appendEvent(.caughtCreature(speciesID: target.species.id))
             state.setOutcome(.caught)
         } else {
             state.appendEvent(.captureFailed(shakes: result.shakes))
