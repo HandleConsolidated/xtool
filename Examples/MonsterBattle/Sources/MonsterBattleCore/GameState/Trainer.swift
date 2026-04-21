@@ -86,8 +86,8 @@ public struct Trainer: Codable, Sendable {
     }
 
     /// Heal the entire party AND the storage box to full. Equivalent to
-    /// visiting a Pokémon-center-style facility; used both there and on
-    /// whiteout recovery.
+    /// visiting a recovery facility; used both there and on whiteout
+    /// recovery.
     public mutating func healAllMonsters() {
         party.healAll()
         storage.healAll()
